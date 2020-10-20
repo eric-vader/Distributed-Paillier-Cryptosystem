@@ -16,9 +16,10 @@ from fractions import gcd
 import secrets
 import sympy
 from sympy.ntheory import jacobi_symbol
-from gmpy2 import powmod, invert
+#from gmpy2 import powmod, invert
 import phe
-from phe.util import invert
+from phe.util import powmod, invert
+from phe import PaillierPrivateKey
 
 from shamir_secret_sharing import ShamirSecretSharingScheme as Shamir
 from shamir_secret_sharing_integers import ShamirSecretSharingIntegers as IntegerShamir
@@ -110,6 +111,11 @@ def generate_shared_paillier_key( keyLength = DEFAULT_KEYSIZE, n = NUMBER_PLAYER
 
         success, theta = compute_theta(SecretKeyShares, N)
 
+    # Hack
+    Key.public_key = PublicKey
+    Key.SecretKeyShares = SecretKeyShares
+    Key.theta = theta
+
     return Key, pShares, qShares, N, PublicKey, LambdaShares, BetaShares, SecretKeyShares, theta
 
 
@@ -119,7 +125,7 @@ def generate_shared_paillier_key( keyLength = DEFAULT_KEYSIZE, n = NUMBER_PLAYER
 """
 ################################################################################
 
-class PaillierSharedKey():
+class PaillierSharedKey(PaillierPrivateKey):
     """
     Class containing relevant attributes and methods of a shared paillier key.
     """
@@ -151,23 +157,22 @@ class PaillierSharedKey():
                 primeArray[i] = 2**(length-1)+secrets.randbits(length-1)
         return primeArray
 
+    def raw_decrypt(self, ciphertext):
 
-    def decrypt(self, Ciphertext, n, t, PublicKey, SecretKeyShares, theta):
-        """
-        Decryption functionality (no decoding).
-        It is assumed that Ciphertext and PublicKey are class instances from
-        the phe library, and that SecretKeyShares is a Shares class instance
-        from Shamir secret sharing over the integers.
-        NB: Now assuming reconstruction set = {1, ..., t+1}
-        NB: this code perfoms both local partial decryption
-        AND combination of them.
-        The two will need to be separated to securely run the code on several
-        machines.
-        """
+        if not isinstance(ciphertext, int):
+            raise TypeError('Expected ciphertext to be an int, not: %s' %
+                type(ciphertext))
+
+        n = self.n
+        t = self.t
+        SecretKeyShares = self.SecretKeyShares
+        theta = self.theta
+
         nFac = math.factorial(n)
 
-        c = Ciphertext.ciphertext()
-        N = PublicKey.n
+        #c = Ciphertext.ciphertext()
+        c = ciphertext
+        N = self.public_key.n
         NSquare = N**2
         shares = SecretKeyShares.shares
         degree = SecretKeyShares.degree
@@ -189,7 +194,7 @@ class PaillierSharedKey():
             print("Error, combined decryption minus one not divisible by N")
 
         message = ( (combinedDecryption-1)//N * invert(theta, N) ) %N
-
+        
         return message
 
     
@@ -327,7 +332,7 @@ def mult_list(L):
 ################################################################################
 
 if __name__ == "__main__":
-    lengths = [50, 100, 256, 512, 1024, 2048]
+    lengths = [ 64 ]
     
     for length in lengths:
         print('Next iteration')
@@ -341,16 +346,29 @@ if __name__ == "__main__":
 
         print('Key generation complete')
 
-        message = 14 # Of course 14!
+        #PublicKey, Key = phe.generate_paillier_keypair(n_length=64)
+
+        import torch as th
+        import syft as sy
+        x = th.randn(100, 100)
+        hook = sy.TorchHook(th)
+        enc_x = x.encrypt("paillier", public_key=PublicKey)
+        print(x)
+        print(enc_x.decrypt(protocol="paillier", private_key=Key))
+
+        message = 1.444444444444444 # Of course 14!
 
         print('Encrypting test message', 'message')
         Ciphertext = PublicKey.encrypt(message)
 
         print('Decrypting obtained ciphertext')
-        decryption = Key.decrypt(Ciphertext, NUMBER_PLAYERS, CORRUPTION_THRESHOLD, PublicKey, SecretKeyShares, theta)
-
+        decryption = Key.decrypt(Ciphertext)
+        print(decryption)
+        
         if message == decryption:
             print('Hurray! Correctly decrypted encryption of', message)
+        else:
+            assert(False)
 
     print('Halleluja!')
     print('\n')
